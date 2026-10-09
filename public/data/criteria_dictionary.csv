@@ -1,0 +1,11 @@
+kode,nama_kriteria,kolom_dataset,tipe,satuan,wajib_default,boleh_dipilih_pengguna,sumber,tahun,catatan
+K01,Curah hujan tahunan rata-rata,hujan_mm_tahun_2020_2024,benefit,mm/tahun,ya,ya,Open-Meteo ERA5,2020-2024,Pemicu hidrometeorologi
+K02,Jumlah kejadian banjir,kejadian_banjir_2024,benefit,kejadian/tahun,ya,ya,BNPB/DIBI,2024,Riwayat banjir
+K03,Jumlah kejadian tanah longsor,kejadian_longsor_2024,benefit,kejadian/tahun,ya,ya,BNPB/DIBI,2024,Riwayat longsor
+K04,Kepadatan penduduk,kepadatan_jiwa_km2,benefit,jiwa/km2,ya,ya,Kepmendagri 2025,2025,Jiwa terpapar per luas
+K05,Indeks bahaya tanah longsor InaRISK,indeks_bahaya_longsor_inarisk,benefit,indeks 0-1,ya,ya,InaRISK,akses 2026-10-08,Proxy kemiringan/lereng
+K06,Indeks bahaya banjir InaRISK,indeks_bahaya_banjir_inarisk,benefit,indeks 0-1,tidak,ya,InaRISK,akses 2026-10-08,Pengganti/pelengkap K05 jika fokus banjir
+K07,Jumlah kejadian cuaca ekstrem,kejadian_cuaca_ekstrem_2024,benefit,kejadian/tahun,tidak,ya,BNPB/DIBI,2024,Hujan ekstrem/angin; relevan pemicu banjir-longsor
+K08,Jumlah penduduk,penduduk_2025,benefit,jiwa,tidak,ya,Kepmendagri 2025,2025,Paparan absolut; jangan dipakai bersama K04 tanpa alasan
+K09,IRBI 2024,irbi_2024,benefit,skor indeks,tidak,ya,Buku IRBI 2024,2024,Opsional; hati-hati sirkular jika digabung K05+K06
+K10,Puncak bahaya longsor InaRISK,indeks_bahaya_longsor_max,benefit,indeks 0-1,tidak,ya,InaRISK,akses 2026-10-08,Titik terparah di wilayah, bukan rata-rata
