@@ -302,7 +302,7 @@ export function DecisionApp() {
             />
             <div>
               <p className="text-[12px] font-medium tracking-[0.14em] text-steel uppercase">
-                SPPK Jawa Timur
+                Tools Pendukung Keputusan Jawa Timur
               </p>
               <p className="text-[14px] font-medium text-indigo-navy">Mitigasi Banjir & Longsor</p>
             </div>
