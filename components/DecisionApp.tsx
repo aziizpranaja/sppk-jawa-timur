@@ -32,11 +32,13 @@ import {
   type PairSide,
 } from "@/lib/ahp";
 import { computeTopsis } from "@/lib/topsis";
+import { MIN_ALTERNATIVES, nextAltKode } from "@/lib/alternatives";
 import { buildConclusion } from "@/lib/conclusion";
 import { PRIORITY_COLOR, PRIORITY_LABEL } from "@/lib/geo";
 import type { Alternative, Criterion, RankedRow } from "@/lib/types";
 import { SpectrumHalftone } from "@/components/SpectrumHalftone";
 import { HalftoneJatim } from "@/components/HalftoneJatim";
+import { AlternativeForm } from "@/components/AlternativeForm";
 import { CustomCriterionForm } from "@/components/CustomCriterionForm";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { withBase } from "@/lib/paths";
@@ -123,6 +125,9 @@ export function DecisionApp() {
   const [extrasReady, setExtrasReady] = useState(false);
   const [showCustomForm, setShowCustomForm] = useState(false);
   const [editingCustom, setEditingCustom] = useState<Criterion | null>(null);
+  const [selectedAlts, setSelectedAlts] = useState<string[]>([]);
+  const [showAltForm, setShowAltForm] = useState(false);
+  const [editingAlt, setEditingAlt] = useState<Alternative | null>(null);
 
   useEffect(() => {
     void fetch(withBase("/data/alternatives_jatim.json"))
@@ -131,7 +136,29 @@ export function DecisionApp() {
         return response.json() as Promise<Alternative[]>;
       })
       .then((rows) => {
-        setData(rows);
+        let next = rows;
+        let selected = rows.map((item) => item.kode_bps);
+        try {
+          const stored = sessionStorage.getItem("sppk-alternatives");
+          if (stored) {
+            const parsed = JSON.parse(stored) as Alternative[];
+            if (Array.isArray(parsed) && parsed.length) next = parsed;
+          }
+          const sel = sessionStorage.getItem("sppk-selected-alts");
+          if (sel) {
+            const parsed = JSON.parse(sel) as string[];
+            const codes = new Set(next.map((item) => item.kode_bps));
+            if (Array.isArray(parsed)) {
+              const kept = parsed.filter((kode) => codes.has(kode));
+              if (kept.length) selected = kept;
+              else selected = [...codes];
+            }
+          }
+        } catch {
+          /* abaikan cache rusak */
+        }
+        setData(next);
+        setSelectedAlts(selected);
         setLoadState("ready");
       })
       .catch(() => setLoadState("error"));
@@ -190,6 +217,12 @@ export function DecisionApp() {
     sessionStorage.setItem("sppk-pool-edits", JSON.stringify(poolEdits));
   }, [extras, poolEdits, extrasReady]);
 
+  useEffect(() => {
+    if (loadState !== "ready") return;
+    sessionStorage.setItem("sppk-alternatives", JSON.stringify(data));
+    sessionStorage.setItem("sppk-selected-alts", JSON.stringify(selectedAlts));
+  }, [data, selectedAlts, loadState]);
+
   const criteria = useMemo(
     () => getCriteria(selected, extras, poolEdits),
     [selected, extras, poolEdits],
@@ -199,12 +232,18 @@ export function DecisionApp() {
     () => (mode === "equal" ? equalWeights(selected) : ahp.weights),
     [mode, selected, ahp.weights],
   );
+  const activeAlts = useMemo(
+    () => data.filter((item) => selectedAlts.includes(item.kode_bps)),
+    [data, selectedAlts],
+  );
   const ranking = useMemo(
-    () => (data.length && criteria.length ? computeTopsis(data, criteria, weights) : []),
-    [data, criteria, weights],
+    () =>
+      activeAlts.length && criteria.length ? computeTopsis(activeAlts, criteria, weights) : [],
+    [activeAlts, criteria, weights],
   );
   const top = ranking[0];
-  const canContinueCriteria = selected.length >= MIN_CRITERIA;
+  const canContinueCriteria =
+    selected.length >= MIN_CRITERIA && selectedAlts.length >= MIN_ALTERNATIVES;
   const focused = ranking.find((row) => row.kode_bps === focusKode) ?? top;
 
   function toggleCriterion(kode: string) {
@@ -279,6 +318,89 @@ export function DecisionApp() {
     setEditingCustom(null);
   }
 
+  function toggleAlt(kode: string) {
+    setSelectedAlts((current) => {
+      if (current.includes(kode)) {
+        if (current.length <= MIN_ALTERNATIVES) return current;
+        return current.filter((item) => item !== kode);
+      }
+      return [...current, kode];
+    });
+  }
+
+  function applyAltPreset(kind: "all" | "kabupaten" | "kota") {
+    const next =
+      kind === "all"
+        ? data.map((item) => item.kode_bps)
+        : data.filter((item) => item.tipe === kind).map((item) => item.kode_bps);
+    if (next.length < MIN_ALTERNATIVES) return;
+    setSelectedAlts(next);
+  }
+
+  function saveAlternative(item: Alternative) {
+    setData((current) => {
+      const exists = current.some((entry) => entry.kode_bps === item.kode_bps);
+      return exists
+        ? current.map((entry) => (entry.kode_bps === item.kode_bps ? item : entry))
+        : [...current, item];
+    });
+    setSelectedAlts((current) =>
+      current.includes(item.kode_bps) ? current : [...current, item.kode_bps],
+    );
+    setPoolEdits((current) => {
+      const next = { ...current };
+      for (const [kode, edit] of Object.entries(next)) {
+        if (!edit.values) continue;
+        const col = edit.kolom ?? CRITERIA_POOL.find((entry) => entry.kode === kode)?.kolom;
+        next[kode] = {
+          ...edit,
+          values: {
+            ...edit.values,
+            [item.kode_bps]: col ? Number(item[col]) || 0 : 0,
+          },
+        };
+      }
+      return next;
+    });
+    setExtras((current) =>
+      current.map((entry) =>
+        entry.values
+          ? {
+              ...entry,
+              values: { ...entry.values, [item.kode_bps]: entry.values[item.kode_bps] ?? 0 },
+            }
+          : entry,
+      ),
+    );
+    setShowAltForm(false);
+    setEditingAlt(null);
+  }
+
+  function removeAlternative(kode: string) {
+    setData((current) => current.filter((item) => item.kode_bps !== kode));
+    setSelectedAlts((current) => current.filter((item) => item !== kode));
+    setPoolEdits((current) => {
+      const next = { ...current };
+      for (const [key, edit] of Object.entries(next)) {
+        if (!edit.values) continue;
+        const { [kode]: _drop, ...rest } = edit.values;
+        next[key] = { ...edit, values: rest };
+      }
+      return next;
+    });
+    setExtras((current) =>
+      current.map((entry) => {
+        if (!entry.values) return entry;
+        const { [kode]: _drop, ...rest } = entry.values;
+        return { ...entry, values: rest };
+      }),
+    );
+    if (editingAlt?.kode_bps === kode) {
+      setEditingAlt(null);
+      setShowAltForm(false);
+    }
+  }
+
   function removeCustom(kode: string) {
     setExtras((current) => current.filter((item) => item.kode !== kode));
     setSelected((current) => {
@@ -349,11 +471,16 @@ export function DecisionApp() {
             extras={extras}
             poolEdits={poolEdits}
             alternatives={data}
+            selectedAlts={selectedAlts}
             canContinue={canContinueCriteria}
             showCustomForm={showCustomForm}
             editingCustom={editingCustom}
+            showAltForm={showAltForm}
+            editingAlt={editingAlt}
             onToggle={toggleCriterion}
             onPreset={applyPreset}
+            onToggleAlt={toggleAlt}
+            onAltPreset={applyAltPreset}
             onNext={() => go("bobot")}
             onOpenForm={() => {
               setEditingCustom(null);
@@ -368,6 +495,20 @@ export function DecisionApp() {
             onCancelForm={() => {
               setShowCustomForm(false);
               setEditingCustom(null);
+            }}
+            onOpenAltForm={() => {
+              setEditingAlt(null);
+              setShowAltForm(true);
+            }}
+            onEditAlt={(item) => {
+              setEditingAlt(item);
+              setShowAltForm(true);
+            }}
+            onRemoveAlt={removeAlternative}
+            onSaveAlt={saveAlternative}
+            onCancelAltForm={() => {
+              setShowAltForm(false);
+              setEditingAlt(null);
             }}
             ranking={ranking}
             focusKode={focusKode}
@@ -433,17 +574,27 @@ function CriteriaStep({
   extras,
   poolEdits,
   alternatives,
+  selectedAlts,
   canContinue,
   showCustomForm,
   editingCustom,
+  showAltForm,
+  editingAlt,
   onToggle,
   onPreset,
+  onToggleAlt,
+  onAltPreset,
   onNext,
   onOpenForm,
   onEditCustom,
   onRemoveCustom,
   onSaveCustom,
   onCancelForm,
+  onOpenAltForm,
+  onEditAlt,
+  onRemoveAlt,
+  onSaveAlt,
+  onCancelAltForm,
   ranking,
   focusKode,
   onFocus,
@@ -453,17 +604,27 @@ function CriteriaStep({
   extras: Criterion[];
   poolEdits: Record<string, Criterion>;
   alternatives: Alternative[];
+  selectedAlts: string[];
   canContinue: boolean;
   showCustomForm: boolean;
   editingCustom: Criterion | null;
+  showAltForm: boolean;
+  editingAlt: Alternative | null;
   onToggle: (kode: string) => void;
   onPreset: (kind: "banjir" | "longsor" | "default") => void;
+  onToggleAlt: (kode: string) => void;
+  onAltPreset: (kind: "all" | "kabupaten" | "kota") => void;
   onNext: () => void;
   onOpenForm: () => void;
   onEditCustom: (item: Criterion) => void;
   onRemoveCustom: (kode: string) => void;
   onSaveCustom: (item: Criterion) => void;
   onCancelForm: () => void;
+  onOpenAltForm: () => void;
+  onEditAlt: (item: Alternative) => void;
+  onRemoveAlt: (kode: string) => void;
+  onSaveAlt: (item: Alternative) => void;
+  onCancelAltForm: () => void;
   ranking: RankedRow[];
   focusKode: string | null;
   onFocus: (kode: string | null) => void;
@@ -483,8 +644,8 @@ function CriteriaStep({
               yang bisa diuji ulang.
             </h1>
             <p className="mt-5 max-w-[42ch] text-[18px] leading-[1.33] font-light text-steel">
-              Pilih kriteria, geser kepentingan, lalu lihat 38 kabupaten/kota Jawa Timur
-              berubah urutan secara langsung.
+              Pilih kriteria dan wilayah, geser kepentingan, lalu lihat ranking
+              berubah secara langsung.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <button type="button" className="btn-primary" disabled={!canContinue} onClick={onNext}>
@@ -548,7 +709,7 @@ function CriteriaStep({
         </div>
 
         <div className="page-wrap relative mt-[72px] grid grid-cols-2 gap-x-8 gap-y-8 md:grid-cols-4 md:gap-12">
-          <Stat label="Wilayah studi" value="38" />
+          <Stat label="Wilayah dihitung" value={String(selectedAlts.length)} />
           <Stat label="Kriteria terpilih" value={String(selected.length)} />
           <Stat label="Pool kriteria" value={String(10 + extras.length)} />
           <Stat label="Metode" value="AHP" />
@@ -700,6 +861,94 @@ function CriteriaStep({
             </div>
           ) : null}
         </div>
+
+        <section className="mt-[72px]">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h2 className="text-[28px] leading-[1.1] font-medium tracking-[-0.28px] text-indigo-navy">
+                Wilayah yang ikut dihitung
+              </h2>
+              <p className="mt-2 text-[14px] text-steel">
+                Centang kabupaten/kota yang masuk TOPSIS. Minimal {MIN_ALTERNATIVES}.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="text-[14px] text-steel">
+                {selectedAlts.length} dipilih · {alternatives.length} wilayah
+              </p>
+              <button type="button" className="btn-ghost" onClick={() => onAltPreset("all")}>
+                Semua
+              </button>
+              <button type="button" className="btn-ghost" onClick={() => onAltPreset("kabupaten")}>
+                Kabupaten
+              </button>
+              <button type="button" className="btn-ghost" onClick={() => onAltPreset("kota")}>
+                Kota
+              </button>
+              <button type="button" className="btn-ghost" onClick={onOpenAltForm}>
+                + Tambah wilayah
+              </button>
+            </div>
+          </div>
+
+          {showAltForm ? (
+            <AlternativeForm
+              alternatives={alternatives}
+              initial={editingAlt}
+              nextKode={nextAltKode(alternatives)}
+              onSave={onSaveAlt}
+              onCancel={onCancelAltForm}
+            />
+          ) : null}
+
+          <div className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+            {alternatives.map((item) => {
+              const active = selectedAlts.includes(item.kode_bps);
+              return (
+                <div
+                  key={item.kode_bps}
+                  className={`card-interactive flex items-center gap-3 px-4 py-3 ${active ? "is-on" : ""}`}
+                >
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    onClick={() => onToggleAlt(item.kode_bps)}
+                  >
+                    <span
+                      className={`grid h-6 w-6 shrink-0 place-items-center rounded-[8px] text-[12px] ${
+                        active ? "bg-indigo-navy text-white" : "bg-cloud-canvas text-fog"
+                      }`}
+                    >
+                      {active ? "✓" : "+"}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[14px] text-indigo-navy">{item.nama}</span>
+                      <span className="font-mono text-[12px] text-fog">
+                        {item.kode_bps} · {item.tipe}
+                      </span>
+                    </span>
+                  </button>
+                  <div className="flex shrink-0 gap-2 text-[13px]">
+                    <button
+                      type="button"
+                      className="font-light text-indigo-navy"
+                      onClick={() => onEditAlt(item)}
+                    >
+                      Ubah
+                    </button>
+                    <button
+                      type="button"
+                      className="font-light text-steel"
+                      onClick={() => onRemoveAlt(item.kode_bps)}
+                    >
+                      Hapus
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
 
         <div className="mt-10 flex justify-end">
           <button type="button" className="btn-primary" disabled={!canContinue} onClick={onNext}>
