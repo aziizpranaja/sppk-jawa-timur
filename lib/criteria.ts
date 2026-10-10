@@ -103,19 +103,42 @@ export function criterionArah(item: Criterion): CriterionDirection {
   return item.arah === "cost" ? "cost" : "benefit";
 }
 
-export function allCriteria(extras: Criterion[] = []): Criterion[] {
-  return [...CRITERIA_POOL, ...extras];
+export function applyPoolEdits(edits: Record<string, Criterion> = {}): Criterion[] {
+  return CRITERIA_POOL.map((item) => {
+    const edit = edits[item.kode];
+    if (!edit) return item;
+    return {
+      ...item,
+      nama: edit.nama,
+      satuan: edit.satuan,
+      deskripsi: edit.deskripsi,
+      arah: edit.arah,
+      values: edit.values,
+    };
+  });
 }
 
-export function getCriteria(kodes: string[], extras: Criterion[] = []): Criterion[] {
-  const pool = allCriteria(extras);
+export function allCriteria(
+  extras: Criterion[] = [],
+  edits: Record<string, Criterion> = {},
+): Criterion[] {
+  return [...applyPoolEdits(edits), ...extras];
+}
+
+export function getCriteria(
+  kodes: string[],
+  extras: Criterion[] = [],
+  edits: Record<string, Criterion> = {},
+): Criterion[] {
+  const pool = allCriteria(extras, edits);
   return kodes
     .map((kode) => pool.find((item) => item.kode === kode))
     .filter((item): item is Criterion => Boolean(item));
 }
 
 export function getCriterionValue(alt: Alternative, criterion: Criterion): number {
-  if (criterion.custom) return Number(criterion.values?.[alt.kode_bps]) || 0;
+  if (criterion.values) return Number(criterion.values[alt.kode_bps]) || 0;
+  if (criterion.custom) return 0;
   if (!criterion.kolom) return 0;
   return Number(alt[criterion.kolom]) || 0;
 }

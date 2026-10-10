@@ -14,6 +14,7 @@ import {
   CRITERIA_POOL,
   DEFAULT_CRITERIA,
   MIN_CRITERIA,
+  applyPoolEdits,
   criterionArah,
   getCriteria,
   getCriterionValue,
@@ -118,6 +119,7 @@ export function DecisionApp() {
   const [scrolled, setScrolled] = useState(false);
   const [focusKode, setFocusKode] = useState<string | null>(null);
   const [extras, setExtras] = useState<Criterion[]>([]);
+  const [poolEdits, setPoolEdits] = useState<Record<string, Criterion>>({});
   const [extrasReady, setExtrasReady] = useState(false);
   const [showCustomForm, setShowCustomForm] = useState(false);
   const [editingCustom, setEditingCustom] = useState<Criterion | null>(null);
@@ -163,6 +165,19 @@ export function DecisionApp() {
           );
         }
       }
+      const editsRaw = sessionStorage.getItem("sppk-pool-edits");
+      if (editsRaw) {
+        const parsed = JSON.parse(editsRaw) as Record<string, Criterion>;
+        if (parsed && typeof parsed === "object") {
+          const next: Record<string, Criterion> = {};
+          for (const item of Object.values(parsed)) {
+            if (item?.kode && CRITERIA_POOL.some((pool) => pool.kode === item.kode)) {
+              next[item.kode] = item;
+            }
+          }
+          setPoolEdits(next);
+        }
+      }
     } catch {
       /* abaikan cache rusak */
     }
@@ -172,9 +187,13 @@ export function DecisionApp() {
   useEffect(() => {
     if (!extrasReady) return;
     sessionStorage.setItem("sppk-custom-criteria", JSON.stringify(extras));
-  }, [extras, extrasReady]);
+    sessionStorage.setItem("sppk-pool-edits", JSON.stringify(poolEdits));
+  }, [extras, poolEdits, extrasReady]);
 
-  const criteria = useMemo(() => getCriteria(selected, extras), [selected, extras]);
+  const criteria = useMemo(
+    () => getCriteria(selected, extras, poolEdits),
+    [selected, extras, poolEdits],
+  );
   const ahp = useMemo(() => computeAhp(selected, pairs), [selected, pairs]);
   const weights = useMemo(
     () => (mode === "equal" ? equalWeights(selected) : ahp.weights),
@@ -237,6 +256,13 @@ export function DecisionApp() {
   }
 
   function saveCustom(item: Criterion) {
+    const isPool = CRITERIA_POOL.some((entry) => entry.kode === item.kode) && !item.custom;
+    if (isPool) {
+      setPoolEdits((current) => ({ ...current, [item.kode]: item }));
+      setShowCustomForm(false);
+      setEditingCustom(null);
+      return;
+    }
     setExtras((current) => {
       const exists = current.some((entry) => entry.kode === item.kode);
       return exists
@@ -321,6 +347,7 @@ export function DecisionApp() {
           <CriteriaStep
             selected={selected}
             extras={extras}
+            poolEdits={poolEdits}
             alternatives={data}
             canContinue={canContinueCriteria}
             showCustomForm={showCustomForm}
@@ -404,6 +431,7 @@ export function DecisionApp() {
 function CriteriaStep({
   selected,
   extras,
+  poolEdits,
   alternatives,
   canContinue,
   showCustomForm,
@@ -423,6 +451,7 @@ function CriteriaStep({
 }: {
   selected: string[];
   extras: Criterion[];
+  poolEdits: Record<string, Criterion>;
   alternatives: Alternative[];
   canContinue: boolean;
   showCustomForm: boolean;
@@ -543,8 +572,18 @@ function CriteriaStep({
           </div>
         </div>
 
+        {showCustomForm ? (
+          <CustomCriterionForm
+            alternatives={alternatives}
+            extras={extras}
+            initial={editingCustom}
+            onSave={onSaveCustom}
+            onCancel={onCancelForm}
+          />
+        ) : null}
+
         {GROUPS.map((grup) => {
-          const items = CRITERIA_POOL.filter((item) => item.grup === grup);
+          const items = applyPoolEdits(poolEdits).filter((item) => item.grup === grup);
           if (!items.length) return null;
           return (
             <div key={grup} className="mt-10">
@@ -556,33 +595,42 @@ function CriteriaStep({
                 {items.map((item, index) => {
                   const active = selected.includes(item.kode);
                   return (
-                    <button
+                    <div
                       key={item.kode}
-                      type="button"
-                      onClick={() => onToggle(item.kode)}
+                      className={`card-interactive animate-rise p-6 ${active ? "is-on" : ""}`}
                       style={{ animationDelay: `${index * 50}ms` }}
-                      className={`card-interactive animate-rise p-6 text-left ${active ? "is-on" : ""}`}
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="font-mono text-[12px] text-seafoam-700">
-                            {item.kode} · {criterionArah(item)}
-                          </p>
-                          <h3 className="mt-2 text-[20px] leading-[1.1] font-medium tracking-[-0.2px] text-indigo-navy">
-                            {item.nama}
-                          </h3>
+                      <button type="button" className="w-full text-left" onClick={() => onToggle(item.kode)}>
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="font-mono text-[12px] text-seafoam-700">
+                              {item.kode} · {criterionArah(item)}
+                            </p>
+                            <h3 className="mt-2 text-[20px] leading-[1.1] font-medium tracking-[-0.2px] text-indigo-navy">
+                              {item.nama}
+                            </h3>
+                          </div>
+                          <span
+                            className={`grid h-6 w-6 place-items-center rounded-[8px] text-[12px] transition ${
+                              active ? "bg-indigo-navy text-white" : "bg-cloud-canvas text-fog"
+                            }`}
+                          >
+                            {active ? "✓" : "+"}
+                          </span>
                         </div>
-                        <span
-                          className={`grid h-6 w-6 place-items-center rounded-[8px] text-[12px] transition ${
-                            active ? "bg-indigo-navy text-white" : "bg-cloud-canvas text-fog"
-                          }`}
+                        <p className="mt-3 text-[14px] leading-5 text-steel">{item.deskripsi}</p>
+                        <p className="mt-4 font-mono text-[12px] text-fog">{item.satuan}</p>
+                      </button>
+                      <div className="mt-4">
+                        <button
+                          type="button"
+                          className="text-[13px] font-light text-indigo-navy"
+                          onClick={() => onEditCustom(item)}
                         >
-                          {active ? "✓" : "+"}
-                        </span>
+                          Ubah
+                        </button>
                       </div>
-                      <p className="mt-3 text-[14px] leading-5 text-steel">{item.deskripsi}</p>
-                      <p className="mt-4 font-mono text-[12px] text-fog">{item.satuan}</p>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -595,16 +643,7 @@ function CriteriaStep({
             <i />
             Kustom
           </p>
-          {showCustomForm ? (
-            <CustomCriterionForm
-              alternatives={alternatives}
-              extras={extras}
-              initial={editingCustom}
-              onSave={onSaveCustom}
-              onCancel={onCancelForm}
-            />
-          ) : null}
-          {extras.length === 0 && !showCustomForm ? (
+          {extras.length === 0 ? (
             <p className="mt-3 text-[14px] text-steel">
               Belum ada kriteria tambahan. Gunakan tombol tambah jika terpikir parameter lain.
             </p>

@@ -30,6 +30,7 @@ export function CustomCriterionForm({
   onSave,
   onCancel,
 }: Props) {
+  const isPool = Boolean(initial && !initial.custom);
   const kode = initial?.kode ?? nextCustomKode(extras);
   const [nama, setNama] = useState(initial?.nama ?? "");
   const [satuan, setSatuan] = useState(initial?.satuan ?? "");
@@ -41,8 +42,16 @@ export function CustomCriterionForm({
   const [values, setValues] = useState<Record<string, string>>(() => {
     const out: Record<string, string> = {};
     for (const alt of alternatives) {
-      const current = initial?.values?.[alt.kode_bps];
-      out[alt.kode_bps] = current == null ? "" : String(current);
+      const stored = initial?.values?.[alt.kode_bps];
+      if (stored != null) {
+        out[alt.kode_bps] = String(stored);
+        continue;
+      }
+      if (initial?.kolom) {
+        out[alt.kode_bps] = String(Number(alt[initial.kolom]) || 0);
+        continue;
+      }
+      out[alt.kode_bps] = "";
     }
     return out;
   });
@@ -84,11 +93,12 @@ export function CustomCriterionForm({
       kode,
       nama: nama.trim(),
       satuan: satuan.trim() || "skor",
-      grup: "Kustom",
-      defaultSelected: false,
-      deskripsi: deskripsi.trim() || "Kriteria tambahan yang diisi manual.",
+      grup: isPool ? (initial?.grup ?? "Kustom") : "Kustom",
+      defaultSelected: isPool ? Boolean(initial?.defaultSelected) : false,
+      deskripsi: deskripsi.trim() || (isPool ? initial?.deskripsi ?? "" : "Kriteria tambahan yang diisi manual."),
       arah,
-      custom: true,
+      custom: !isPool,
+      kolom: isPool ? initial?.kolom : undefined,
       values: parsed,
     });
   }
@@ -100,7 +110,9 @@ export function CustomCriterionForm({
     >
       <header className="flex flex-wrap items-start justify-between gap-4 px-6 py-5">
         <div>
-          <p className="font-mono text-[12px] text-seafoam-700">{kode} · kustom</p>
+          <p className="font-mono text-[12px] text-seafoam-700">
+            {kode} · {isPool ? "edit" : "kustom"}
+          </p>
           <h3 className="mt-2 text-[20px] leading-[1.1] font-medium tracking-[-0.2px] text-indigo-navy">
             {initial ? "Ubah kriteria" : "Tambah kriteria"}
           </h3>
